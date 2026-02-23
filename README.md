@@ -1,169 +1,91 @@
-Here is a complete, formatted Markdown template that you can copy and paste directly into your GitHub repository's `README.md` file. It covers the true hardware specs, the mislabeled memory quirks, the exact pinouts, and the base ESPHome code needed to run the lab-grade incubator simulator box smoothly.
+Here is a refined, processor-focused Markdown template for your GitHub repository. I have completely stripped out all the display, font, and UI code, leaving only the pure technical documentation for the ESP32-S3 chip, its memory quirks, and the baseline configuration needed to keep it stable.
 
 ---
 
-# ESP32-S3 DevKitC-1 (N8R2) - Incubator Simulator Controller
+# ESP32-S3 DevKitC-1 - Hardware & Memory Documentation
 
-This repository contains the hardware documentation and base ESPHome configuration for the ESP32-S3 microcontroller used as the main brain for a Lab-Grade incubator simulator box.
+This repository documents the core microcontroller configuration for the incubator simulator project. The main processor is an **ESP32-S3**, but specific memory configurations are required to prevent fatal crashes and boot loops.
 
-This specific build drives a high-resolution 240x320 ST7789V TFT display, utilizing external PSRAM for smooth, anti-aliased TrueType fonts and flicker-free UI rendering.
+## ⚠️ Important Hardware Notice: Mislabeled Memory (N16R8 vs N8R2)
 
-## ⚠️ Important Hardware Notice: Mislabeled Memory
+It is highly common for ESP32-S3 boards sourced online to be mislabeled by the seller. This specific board was sold as an **N16R8** model (16MB Flash, 8MB Octal PSRAM), but physical hardware probing revealed it is actually an **N8R2** model.
 
-This board was originally sold/labeled as an **N16R8** (16MB Flash, 8MB Octal PSRAM). However, physical hardware probing via boot logs revealed the factory actually populated it as an **N8R2**.
+If you attempt to flash this board using `flash_size: 16MB` or `mode: octal`, the board will experience instant fatal exceptions (`rtc_sw_cpu_rst`), constant boot loops, and Wi-Fi initialization failures.
 
-Configuring the software for 16MB/Octal on this 8MB/Quad board will result in instant fatal exceptions, continuous boot loops, and Wi-Fi crashes. **You must use the exact memory configuration provided below for the board to remain stable.**
+**You must use the exact 8MB / Quad memory configuration provided below for the board to remain stable.**
 
 ### True Hardware Specifications
 
 * **Core:** ESP32-S3 (Dual Core, 160MHz)
-* **Flash Memory:** 8MB (Must be declared in ESPHome to prevent boot crashes)
+* **Physical Flash Memory:** 8MB
 * **External RAM (PSRAM):** 2MB
 * **PSRAM Protocol:** Quad SPI @ 40MHz (Not Octal)
-* **USB Ports:** 2 (1x Native USB, 1x UART/COM for serial flashing/logging)
+* **USB Ports:** 2 (1x Native USB, 1x UART/COM for serial flashing and log reading)
 
-## 🔌 Wiring & Pinout Guide
+## 🔍 How to Verify True Hardware Memory
 
-The board communicates with the ST7789V display over a high-speed SPI bus.
+If you are setting up a new board and need to verify its actual memory chips, do not rely on the seller's description. Plug the board into your computer via the UART/COM port and view the serial boot log.
 
-| Display Pin | ESP32-S3 GPIO | Function |
-| --- | --- | --- |
-| **CLK / SCL** | GPIO12 | SPI Clock |
-| **MOSI / SDA** | GPIO11 | SPI Data Input |
-| **CS** | GPIO8 | Chip Select |
-| **DC** | GPIO9 | Data / Command |
-| **RST** | GPIO10 | Reset |
-| **BLK** | GPIO7 | Backlight (Configured as PWM/Switch) |
-| **VCC** | 3.3V | Power |
-| **GND** | GND | Ground |
+Look for these exact lines during the initial boot sequence:
 
-## 🛠️ Critical ESPHome Fixes & Quirks
+* **To verify Flash:** `I (30) spi_flash: detected size(8192k)` *(Confirms 8MB Flash)*
+* **To verify PSRAM:** `I (45) esp_psram: Found 2MB PSRAM device` *(Confirms 2MB RAM)*
 
-### 1. Memory Configuration
+## 💻 Baseline ESPHome Configuration
 
-To unlock the external RAM for the display buffer without crashing the board, the memory must be strictly defined:
-
-```yaml
-esp32:
-  board: esp32-s3-devkitc-1
-  flash_size: 8MB
-psram:
-  mode: quad
-  speed: 40MHz
-
-```
-
-### 2. The Display "Color Fix"
-
-By default, the ST7789V driver may render a negative image and swap Red for Blue. You must apply these color overrides in the `display:` block:
-
-```yaml
-invert_colors: false
-color_order: BGR
-
-```
-
-### 3. Wi-Fi Stability under Load
-
-When driving high-resolution graphics from PSRAM, the ESP32's power management can drop the Wi-Fi connection. To prevent disconnects, disable Wi-Fi power saving:
-
-```yaml
-wifi:
-  power_save_mode: none
-
-```
-
-## 💻 Base ESPHome Configuration
-
-Here is the stable, baseline YAML template to get the board online and the display rendering correctly. *Note: You must place your chosen `.ttf` font file (e.g., `Roboto_Condensed-Bold.ttf`) in the same directory as this YAML file.*
+Here is the stable, bare-minimum YAML template required to get this specific ESP32-S3 online, allocate its memory correctly, and expose diagnostic sensors to Home Assistant so you can monitor RAM usage in real-time.
 
 ```yaml
 esphome:
-  name: esp32-s3-incubator
+  name: esp32-s3-core
   friendly_name: Simulator Controller
 
+# 1. MATCH THE PHYSICAL FLASH SIZE
 esp32:
   board: esp32-s3-devkitc-1
   framework:
     type: arduino
   flash_size: 8MB
 
+# 2. ACTIVATE THE EXTERNAL RAM (Standard Quad Mode)
 psram:
   mode: quad
   speed: 40MHz
 
+# Enable serial logging (115200 baud recommended for S3 boards)
 logger:
   baud_rate: 115200
 
-# Required to use the "Free RAM" sensors
+# 3. ENABLE LIVE MEMORY DIAGNOSTICS
 debug:
 
 sensor:
   - platform: debug
+    # Monitors standard internal memory
     free:
       name: "Free Internal RAM"
+    # Monitors the 2MB external chip we enabled above
     psram:
       name: "Free PSRAM"
 
 api:
 ota:
 
+# 4. PREVENT WI-FI CRASHES UNDER LOAD
 wifi:
   ssid: "YOUR_SSID"
   password: "YOUR_PASSWORD"
+  # Disabling power save mode prevents the Wi-Fi modem from sleeping 
+  # and dropping off the network when the processor is under heavy load.
   power_save_mode: none
+
   ap:
-    ssid: "ESP32 Hotspot"
-
-# --- FONT DEFINITION ---
-font:
-  - file: "Roboto_Condensed-Bold.ttf"
-    id: font_main
-    size: 20
-
-# --- SPI BUS ---
-spi:
-  clk_pin: GPIO12
-  mosi_pin: GPIO11
-
-# --- BACKLIGHT CONTROL ---
-output:
-  - platform: gpio
-    pin: GPIO7
-    id: backlight_out
-light:
-  - platform: binary
-    output: backlight_out
-    name: "Display Backlight"
-    restore_mode: ALWAYS_ON
-
-# --- DISPLAY CONFIGURATION ---
-display:
-  - platform: ili9xxx
-    model: ST7789V
-    id: tft
-    cs_pin: GPIO8
-    dc_pin: GPIO9
-    reset_pin: GPIO10
-    
-    # Color Fixes
-    invert_colors: false
-    color_order: BGR
-    rotation: 90°
-    
-    dimensions:
-      width: 240
-      height: 320
-
-    lambda: |-
-      it.fill(Color(12, 12, 20)); // Dark Background
-      it.print(it.get_width() / 2, 20, id(font_main), Color::WHITE, TextAlign::CENTER, "SYSTEM ONLINE");
+    ssid: "ESP32 Fallback Hotspot"
 
 ```
 
 ---
 
-This should give anyone looking at your GitHub repository (including yourself a few months from now!) a perfect understanding of exactly what this board is and how to program it.
+This gives you a clean, processor-only foundation for your GitHub repository.
 
-Would you like me to help you map out the wiring and YAML code for the actual temperature and humidity sensors next?
-
+Would you like me to help you draft the next section of your documentation covering the specific ESP32-S3 GPIO pins you plan to use for your incubator's sensors (like your temperature/humidity modules) and relays?
